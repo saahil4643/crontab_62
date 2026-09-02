@@ -42,11 +42,27 @@ def _credentials_candidates() -> list[Path]:
 
 def get_credentials() -> Credentials:
     checked: list[str] = []
+    permission_denied: list[str] = []
     for path in _credentials_candidates():
         checked.append(str(path))
         if path.is_file():
-            logger.info("Using credentials: %s", path)
-            return Credentials.from_service_account_file(str(path), scopes=GOOGLE_SCOPES)
+            if not os.access(path, os.R_OK):
+                permission_denied.append(str(path))
+                logger.warning("Permission denied reading credentials at %s", path)
+                continue
+            try:
+                logger.info("Using credentials: %s", path)
+                return Credentials.from_service_account_file(str(path), scopes=GOOGLE_SCOPES)
+            except PermissionError:
+                permission_denied.append(str(path))
+                logger.warning("Permission denied reading %s", path)
+                continue
+
+    if permission_denied:
+        raise PermissionError(
+            f"Permission denied reading {permission_denied[0]}. "
+            f"Place keys.json in project root and set GOOGLE_CREDENTIALS_PATH=keys.json in .env"
+        )
 
     raise FileNotFoundError(
         "No Google credentials found. Checked:\n"
