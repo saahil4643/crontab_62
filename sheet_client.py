@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 import gspread
 from gspread import Worksheet
@@ -36,14 +37,72 @@ def _refresh_all_cells() -> bool:
     return raw not in {"missing_only", "missing", "empty_only"}
 
 
+def _retry_sheet_operation(
+    func,
+    *args,
+    max_attempts: int = 6,
+    base_delay: float = 3.0,
+    label: str = "operation",
+    **kwargs,
+):
+    """Execute a Google Sheets API operation with automatic retry on transient errors (503, 500, 502, 504, 429, timeouts)."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            err_str = str(exc).lower()
+            is_transient = any(
+                code in err_str
+                for code in (
+                    "503",
+                    "502",
+                    "500",
+                    "504",
+                    "429",
+                    "timed out",
+                    "timeout",
+                    "unavailable",
+                    "temporarily",
+                    "quota",
+                    "connection reset",
+                    "remotely closed",
+                )
+            )
+            if attempt >= max_attempts or not is_transient:
+                raise
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "[Google Sheets] %s failed (attempt %d/%d): %s. Retrying in %.1fs...",
+                label,
+                attempt,
+                max_attempts,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+
+
 class DcfSheetClient:
-    """Reads/writes the Missing Value worksheet."""
+    """Reads/writes the Missing Value worksheet with automatic retries."""
 
     def __init__(self) -> None:
         creds = get_credentials()
         gc = gspread.authorize(creds)
-        self._spreadsheet = gc.open_by_url(SHEET_URL)
-        self._worksheet: Worksheet = self._spreadsheet.worksheet(WORKSHEET_MISSING_VALUE)
+        logger.info("Connecting to Google Spreadsheet (ID: %s)...", SHEET_ID)
+        if SHEET_ID:
+            self._spreadsheet = _retry_sheet_operation(
+                gc.open_by_key, SHEET_ID, label=f"open_by_key({SHEET_ID})"
+            )
+        else:
+            self._spreadsheet = _retry_sheet_operation(
+                gc.open_by_url, SHEET_URL, label=f"open_by_url({SHEET_URL})"
+            )
+
+        self._worksheet: Worksheet = _retry_sheet_operation(
+            self._spreadsheet.worksheet,
+            WORKSHEET_MISSING_VALUE,
+            label=f"worksheet({WORKSHEET_MISSING_VALUE})",
+        )
         logger.info("Opened spreadsheet %s tab %r", SHEET_ID, WORKSHEET_MISSING_VALUE)
 
     @property
@@ -70,7 +129,10 @@ class DcfSheetClient:
         completed_cache = {}
         for block in MISSING_VALUE_BLOCKS:
             completed_cache[block.source] = get_completed_rows(block.source)
-        all_values = self._worksheet.get_all_values()
+        all_values = _retry_sheet_operation(
+            self._worksheet.get_all_values,
+            label="get_all_values",
+        )
         if not all_values:
             logger.warning("Sheet is empty")
             return jobs
@@ -187,4 +249,9 @@ class DcfSheetClient:
             }
             for update in updates
         ]
-        self._worksheet.batch_update(payload, value_input_option="USER_ENTERED")
+        _retry_sheet_operation(
+            self._worksheet.batch_update,
+            payload,
+            value_input_option="USER_ENTERED",
+            label=f"batch_update({len(payload)} cells)",
+        )
