@@ -112,6 +112,8 @@ def browser_headless(*, force_headed: bool = False) -> bool:
       - 0/false: always headed
       - 1/true: always headless
     """
+    if not os.environ.get("DISPLAY"):
+        return True
     if force_headed:
         return False
 

@@ -57,7 +57,9 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def browser_headless() -> bool:
-    return _env_bool("RESILIENT_HEADLESS", False)
+    if not os.environ.get("DISPLAY"):
+        return True
+    return _env_bool("RESILIENT_HEADLESS", True)
 
 
 def _identity_user_agent(identity_serial: int) -> str:

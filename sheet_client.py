@@ -98,12 +98,34 @@ class DcfSheetClient:
                 gc.open_by_url, SHEET_URL, label=f"open_by_url({SHEET_URL})"
             )
 
-        self._worksheet: Worksheet = _retry_sheet_operation(
-            self._spreadsheet.worksheet,
-            WORKSHEET_MISSING_VALUE,
-            label=f"worksheet({WORKSHEET_MISSING_VALUE})",
-        )
-        logger.info("Opened spreadsheet %s tab %r", SHEET_ID, WORKSHEET_MISSING_VALUE)
+        try:
+            self._worksheet: Worksheet = _retry_sheet_operation(
+                self._spreadsheet.worksheet,
+                WORKSHEET_MISSING_VALUE,
+                label=f"worksheet({WORKSHEET_MISSING_VALUE})",
+            )
+        except Exception as ws_exc:
+            available = [ws.title for ws in self._spreadsheet.worksheets()]
+            logger.warning(
+                "Worksheet %r not found directly. Available tabs in sheet: %s",
+                WORKSHEET_MISSING_VALUE,
+                available,
+            )
+            matched = None
+            target_norm = WORKSHEET_MISSING_VALUE.strip().lower()
+            for title in available:
+                if title.strip().lower() == target_norm:
+                    matched = title
+                    break
+            if matched:
+                logger.info("Matched worksheet tab %r", matched)
+                self._worksheet = self._spreadsheet.worksheet(matched)
+            else:
+                raise RuntimeError(
+                    f"Worksheet {WORKSHEET_MISSING_VALUE!r} not found. Available tabs: {available}"
+                ) from ws_exc
+
+        logger.info("Opened spreadsheet %s tab %r", SHEET_ID, self._worksheet.title)
 
     @property
     def worksheet(self) -> Worksheet:

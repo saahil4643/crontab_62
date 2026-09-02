@@ -60,7 +60,7 @@ def test_google_sheets() -> tuple[bool, str, float]:
         return True, f"Connected to '{ws.title}' ({len(all_vals)} jobs queued)", elapsed
     except Exception as exc:
         elapsed = time.time() - t0
-        return False, f"Error: {exc}", elapsed
+        return False, f"{type(exc).__name__}: {exc or repr(exc)}", elapsed
 
 
 async def test_scrapers_live():
