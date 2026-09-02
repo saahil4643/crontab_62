@@ -35,6 +35,27 @@ def _bootstrap_env() -> None:
 _bootstrap_env()
 
 
+def _force_ipv4_preference() -> None:
+    """Prefer IPv4 over broken IPv6 routes without needing sudo."""
+    import socket
+
+    if os.environ.get("FORCE_IPV4", "1").lower() in {"1", "true", "yes"}:
+        _orig_getaddrinfo = socket.getaddrinfo
+
+        def _ipv4_first_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            if family == 0:
+                try:
+                    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+                except Exception:
+                    pass
+            return _orig_getaddrinfo(host, port, family, type, proto, flags)
+
+        socket.getaddrinfo = _ipv4_first_getaddrinfo
+
+
+_force_ipv4_preference()
+
+
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
