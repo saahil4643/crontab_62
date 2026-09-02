@@ -16,7 +16,7 @@ from sheet_client import DcfSheetClient
 
 logger = logging.getLogger(__name__)
 
-SHEET_WRITE_BATCH_SIZE = _env_int("SHEET_WRITE_BATCH_SIZE", 15)
+SHEET_WRITE_BATCH_SIZE = _env_int("SHEET_WRITE_BATCH_SIZE", 1)
 SHEET_RETRY_ATTEMPTS = _env_int("SHEET_RETRY_ATTEMPTS", 6)
 SHEET_RETRY_BASE_SECONDS = _env_float("SHEET_RETRY_BASE_SECONDS", 2)
 SHEET_RATE_LIMIT_BACKOFF_SECONDS = _env_float("SHEET_RATE_LIMIT_BACKOFF_SECONDS", 90)
@@ -119,12 +119,12 @@ class SheetWriteBuffer:
         self._queue.append(CellUpdate(job=job, value=value, action="write"))
         self._queued_total += 1
         logger.info(
-            "[sheet] Queued write row=%d col=%s ticker=%s value=%r (buffer=%d)",
+            "[STOCK READY] Row %d | Col %s | %s (%s) = %s (buffered)",
             job.row,
             job.value_col,
             job.ticker,
+            job.label,
             value,
-            len(self._queue),
         )
         await self.maybe_flush()
 
@@ -235,20 +235,20 @@ class SheetWriteBuffer:
         job = update.job
         if update.action == "clear":
             logger.info(
-                "Cleared row %d col %s (%s) %s old=%r",
+                "[SHEET CLEARED] Row %d | Col %s | %s (%s) | Stale value %r cleared from Google Sheet",
                 job.row,
                 job.value_col,
-                job.label,
                 job.ticker,
+                job.label,
                 job.current_value,
             )
         else:
             logger.info(
-                "Updated row %d col %s (%s) %s -> %r",
+                "[SHEET UPDATED] Row %d | Col %s | %s (%s) -> Written to Google Sheet: %s",
                 job.row,
                 job.value_col,
-                job.label,
                 job.ticker,
+                job.label,
                 update.value,
             )
 

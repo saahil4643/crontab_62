@@ -19,11 +19,12 @@ log_run_banner = _jl.log_run_banner
 _worker_logger = logging.getLogger("cron62.worker")
 
 
-def setup_logging(*, also_stdout: bool = False) -> tuple[logging.Logger, str]:
+def setup_logging(*, also_stdout: bool = True) -> tuple[logging.Logger, str]:
     """
     Configure cron-62 worker logging.
 
     Writes to {JOB_NAME}-worker-{YYYY-MM-DD}.log; module loggers propagate to root.
+    Streams to stdout/console live when also_stdout=True.
     Returns (worker_logger, log_path).
     """
     global _worker_logger
@@ -33,7 +34,7 @@ def setup_logging(*, also_stdout: bool = False) -> tuple[logging.Logger, str]:
         JOB_NAME,
         str(LOG_DIR),
         role="worker",
-        also_stdout=False,
+        also_stdout=also_stdout,
     )
     log_run_banner(_worker_logger, JOB_NAME, "worker")
     _worker_logger.info("worker log_file=%s", log_path)
@@ -52,8 +53,12 @@ def setup_logging(*, also_stdout: bool = False) -> tuple[logging.Logger, str]:
     root.addHandler(file_handler)
 
     if also_stdout:
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(fmt)
+        console_fmt = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        stream_handler = logging.StreamHandler(sys.__stdout__ or sys.stdout)
+        stream_handler.setFormatter(console_fmt)
         root.addHandler(stream_handler)
 
     return _worker_logger, log_path

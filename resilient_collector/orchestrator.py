@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -70,8 +71,29 @@ _CHUNK_SIZES: dict[str, int] = {
     "yahoo": _CHUNK_SIZE_YAHOO,
 }
 
+# Anti-ban delay (seconds) between individual stock requests to protect VPS IP
+_SCRAPE_DELAY_SECONDS: float = float(os.environ.get("SCRAPE_DELAY_SECONDS", "5.0"))
+_SCRAPE_DELAY_JITTER_SECONDS: float = float(os.environ.get("SCRAPE_DELAY_JITTER_SECONDS", "1.5"))
+
 # Inter-chunk delay (seconds) to avoid hammering sites
 _INTER_CHUNK_DELAY: float = float(os.environ.get("RESILIENT_INTER_CHUNK_DELAY_SECONDS", "2"))
+
+
+async def _sleep_between_stocks(shutdown: ShutdownController, label: str = "") -> None:
+    if shutdown.is_requested():
+        return
+    delay = _SCRAPE_DELAY_SECONDS
+    if _SCRAPE_DELAY_JITTER_SECONDS > 0:
+        delay += random.uniform(0.0, _SCRAPE_DELAY_JITTER_SECONDS)
+    if delay <= 0:
+        return
+    logger.info(
+        "[ANTI-BAN DELAY] Pausing %.1fs before next request (%s) to protect VPS IP...",
+        delay,
+        label,
+    )
+    from resilient_collector.nav_retry import interruptible_sleep_seconds
+    await interruptible_sleep_seconds(delay, shutdown)
 
 
 # --------------------------------------------------------------------------
@@ -382,6 +404,12 @@ async def _process_alphaspread_chunk(
             mark_completed(job.source, job.row)
             continue
 
+        logger.info(
+            "[SCRAPING] Row %d | Col %s | %s | Source: Alpha Spread",
+            job.row,
+            job.value_col,
+            job.ticker,
+        )
         value = None
         try:
             value = await _scrape_alphaspread(job, proxy_pool)
@@ -390,7 +418,9 @@ async def _process_alphaspread_chunk(
 
         if value is not None:
             from scrapers import format_for_sheet
-            await buffer.enqueue_write(job, format_for_sheet(value))
+            formatted = format_for_sheet(value)
+            logger.info("[SCRAPE SUCCESS] %s | Alpha Spread = %s", job.ticker, formatted)
+            await buffer.enqueue_write(job, formatted)
         else:
             logger.warning(
                 "[%s] alphaspread: primary scraper returned no value; triggering AI DCF fallback",
@@ -400,13 +430,16 @@ async def _process_alphaspread_chunk(
             ai_value = await fetch_dcf_ai_fallback(job.ticker, job.label)
             if ai_value is not None:
                 from scrapers import format_for_sheet
-                await buffer.enqueue_write(job, format_for_sheet(ai_value))
+                formatted_ai = format_for_sheet(ai_value)
+                logger.info("[SCRAPE AI FALLBACK] %s | Alpha Spread = %s", job.ticker, formatted_ai)
+                await buffer.enqueue_write(job, formatted_ai)
             else:
                 logger.warning(
                     "[%s] alphaspread: no valid DCF value from primary scraper or AI fallback",
                     job.ticker,
                 )
         mark_completed(job.source, job.row)
+        await _sleep_between_stocks(shutdown, f"{job.ticker} (alphaspread)")
 
 
 async def _process_valueinvesting_chunk(
@@ -425,6 +458,12 @@ async def _process_valueinvesting_chunk(
             mark_completed(job.source, job.row)
             continue
 
+        logger.info(
+            "[SCRAPING] Row %d | Col %s | %s | Source: ValueInvesting",
+            job.row,
+            job.value_col,
+            job.ticker,
+        )
         value = None
         try:
             value = await _scrape_valueinvesting(job, vi_session)
@@ -437,7 +476,9 @@ async def _process_valueinvesting_chunk(
 
         if value is not None:
             from scrapers import format_for_sheet
-            await buffer.enqueue_write(job, format_for_sheet(value))
+            formatted = format_for_sheet(value)
+            logger.info("[SCRAPE SUCCESS] %s | ValueInvesting = %s", job.ticker, formatted)
+            await buffer.enqueue_write(job, formatted)
         else:
             logger.warning(
                 "[%s] valueinvesting: primary scraper returned no value; triggering AI DCF fallback",
@@ -447,13 +488,16 @@ async def _process_valueinvesting_chunk(
             ai_value = await fetch_dcf_ai_fallback(job.ticker, job.label)
             if ai_value is not None:
                 from scrapers import format_for_sheet
-                await buffer.enqueue_write(job, format_for_sheet(ai_value))
+                formatted_ai = format_for_sheet(ai_value)
+                logger.info("[SCRAPE AI FALLBACK] %s | ValueInvesting = %s", job.ticker, formatted_ai)
+                await buffer.enqueue_write(job, formatted_ai)
             else:
                 logger.warning(
                     "[%s] valueinvesting: no valid DCF value from primary scraper or AI fallback",
                     job.ticker,
                 )
         mark_completed(job.source, job.row)
+        await _sleep_between_stocks(shutdown, f"{job.ticker} (valueinvesting)")
 
 
 async def _process_gurufocus_chunk(
@@ -470,6 +514,12 @@ async def _process_gurufocus_chunk(
             mark_completed(job.source, job.row)
             continue
 
+        logger.info(
+            "[SCRAPING] Row %d | Col %s | %s | Source: GuruFocus",
+            job.row,
+            job.value_col,
+            job.ticker,
+        )
         value = None
         try:
             value = await _scrape_gurufocus(job, gf_session)
@@ -478,7 +528,9 @@ async def _process_gurufocus_chunk(
 
         if value is not None:
             from scrapers import format_for_sheet
-            await buffer.enqueue_write(job, format_for_sheet(value))
+            formatted = format_for_sheet(value)
+            logger.info("[SCRAPE SUCCESS] %s | GuruFocus = %s", job.ticker, formatted)
+            await buffer.enqueue_write(job, formatted)
         else:
             logger.warning(
                 "[%s] gurufocus: primary scraper returned no value; triggering AI DCF fallback",
@@ -488,14 +540,16 @@ async def _process_gurufocus_chunk(
             ai_value = await fetch_dcf_ai_fallback(job.ticker, job.label)
             if ai_value is not None:
                 from scrapers import format_for_sheet
-                await buffer.enqueue_write(job, format_for_sheet(ai_value))
+                formatted_ai = format_for_sheet(ai_value)
+                logger.info("[SCRAPE AI FALLBACK] %s | GuruFocus = %s", job.ticker, formatted_ai)
+                await buffer.enqueue_write(job, formatted_ai)
             else:
                 logger.warning(
                     "[%s] gurufocus: no valid DCF value from primary scraper or AI fallback",
                     job.ticker,
                 )
         mark_completed(job.source, job.row)
-
+        await _sleep_between_stocks(shutdown, f"{job.ticker} (gurufocus)")
 
 
 async def _process_yahoo_chunk(
@@ -507,18 +561,22 @@ async def _process_yahoo_chunk(
     for group in groups:
         if shutdown.is_requested():
             return
+        logger.info("[SCRAPING] Stock: %s | Source: Yahoo Targets", group.ticker)
         try:
             results = await _scrape_yahoo_group(group, proxy_pool)
             from scrapers import format_for_sheet
             for job in group.jobs:
                 value = results.get(job.source)
                 if value is not None:
-                    await buffer.enqueue_write(job, format_for_sheet(value))
+                    formatted = format_for_sheet(value)
+                    logger.info("[SCRAPE SUCCESS] %s | %s = %s", job.ticker, job.label, formatted)
+                    await buffer.enqueue_write(job, formatted)
                 else:
                     logger.warning("[%s] yahoo %s: no value found", job.ticker, job.source)
                 mark_completed(job.source, job.row)
         except Exception as exc:
             logger.error("[%s] yahoo scrape error: %s", group.ticker, exc)
+        await _sleep_between_stocks(shutdown, f"{group.ticker} (yahoo)")
 
 
 # --------------------------------------------------------------------------
