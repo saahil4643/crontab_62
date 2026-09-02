@@ -159,7 +159,6 @@ async def test_scrapers_live():
     try:
         group = YahooTickerGroup(
             ticker="AAPL",
-            security_type="nasdaq",
             jobs=[
                 ScrapeJob(source="price_target_low", ticker="AAPL", row=3, value_col="T", value_col_index=20, label="Low Target"),
                 ScrapeJob(source="price_target_avg", ticker="AAPL", row=3, value_col="U", value_col_index=21, label="Avg Target"),
